@@ -14,7 +14,7 @@ This repository contains tools for working with the [Chordonomicon dataset](http
 
 I'm planning to link the songs to another dataset containing their lyrics, such as the Genius dataset, and train a model on the lyrics to cross the chord progressions to the general sentiment of the songs.
 
-I also am working on a remapper for the chords on the dataset to make it key agnostic. 
+I am also working on a remapper for the chords on the dataset to make it key agnostic. 
 
 
 ## Requirements

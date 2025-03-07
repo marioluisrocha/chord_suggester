@@ -10,6 +10,13 @@ This repository contains tools for working with the [Chordonomicon dataset](http
 2. Enrich it with artist and song names from Spotify
 3. Explore and analyze the chord progressions and metadata
 
+## Things I'm working on right now
+
+I'm planning to link the songs to another dataset containing their lyrics, such as the Genius dataset, and train a model on the lyrics to cross the chord progressions to the general sentiment of the songs.
+
+I also am working on a remapper for the chords on the dataset to make it key agnostic. 
+
+
 ## Requirements
 
 - Python 3.6+

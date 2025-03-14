@@ -12,7 +12,7 @@ This repository contains tools for working with the [Chordonomicon dataset](http
 
 ## Things I'm working on right now
 
-I'm planning to link the songs to another dataset containing their lyrics, such as the Genius dataset, and train a model on the lyrics to cross the chord progressions to the general sentiment of the songs.
+I'm planning to link the songs to another dataset containing their lyrics, such as the [Genius dataset](https://www.kaggle.com/datasets/carlosgdcj/genius-song-lyrics-with-language-information), and train a model on the lyrics to cross the chord progressions to the general sentiment of the songs.
 
 I am also working on a remapper for the chords on the dataset to make it key agnostic. 
 
@@ -31,13 +31,13 @@ I am also working on a remapper for the chords on the dataset to make it key agn
 
 1. Clone this repository:
 ```bash
-git clone https://github.com/yourusername/chordonomicon-tools.git
-cd chordonomicon-tools
+git clone https://github.com/marioluisrocha/chord_suggester
+cd chord_suggester
 ```
 
 2. Install the required packages:
 ```bash
-pip install pandas spotipy huggingface_hub matplotlib seaborn
+pip install pandas spotipy huggingface_hub matplotlib seaborn fuzzywuzzy
 ```
 
 ## Usage

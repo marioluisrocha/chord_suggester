@@ -91,7 +91,55 @@ Features of the Spotify connector:
 - Skips already processed entries for efficiency
 - Provides detailed progress updates and statistics
 
-### 3. Exploring the Dataset
+### 3. GPU-Accelerated Lyrics Merging
+
+To merge the Spotify dataset with a lyrics dataset using GPU acceleration:
+
+```bash
+python gpu_merge_datasets.py spotify_data.csv lyrics_data.csv output.csv
+```
+
+This script uses CUDA-accelerated processing to efficiently match songs from the Spotify dataset with their lyrics from a lyrics dataset.
+
+#### Requirements for GPU Acceleration
+
+- NVIDIA GPU with CUDA support
+- Required packages:
+  - cudf
+  - cupy
+  - numba
+  - rapidfuzz
+
+#### Advanced Usage with Language Filtering
+
+The script supports filtering the lyrics dataset by language before merging:
+
+```bash
+python gpu_merge_datasets.py spotify_data.csv lyrics_data.csv output.csv --language en --language-column language_cld3
+```
+
+Features of the language filtering:
+- Filter by a single language: `--language en` (for English only)
+- Filter by multiple languages: `--language en,es,fr` (for English, Spanish, and French)
+- Specify which language column to use: `--language-column language_cld3` or `--language-column language_ft`
+- Automatic detection of language columns if not specified
+
+Other optional arguments:
+- `--artist-threshold`: Threshold for fuzzy matching artist names (0-100, default: 85)
+- `--title-threshold`: Threshold for fuzzy matching song titles (0-100, default: 85)
+- `--chunk-size`: Number of rows to process at once (default: 10000)
+- `--batch-size`: Number of rows to process in each GPU batch (default: 1000)
+
+#### How it Works
+
+1. Detects the artist, title, and lyrics columns in both datasets automatically
+2. Applies language filtering to the lyrics dataset if specified
+3. Processes data in chunks to minimize memory usage
+4. Uses GPU-accelerated fuzzy matching to find the best matches when exact matches aren't found
+5. Outputs a merged dataset with Spotify data and matching lyrics
+6. Provides detailed statistics on match rates and processing time
+
+### 4. Exploring the Dataset
 
 After enriching the dataset, you can explore and analyze it:
 
@@ -110,6 +158,7 @@ This script provides:
 
 - `chordonomicon_downloader.py`: Downloads the dataset from Hugging Face
 - `spotify_connector_v2.py`: Enriches the dataset with Spotify artist and song information
+- `gpu_merge_datasets.py`: Merges Spotify data with lyrics datasets using GPU acceleration
 - `chordonomicon_explorer.py`: Analyzes and explores the enriched dataset
 
 ## Directory Structure
@@ -121,6 +170,7 @@ After running the scripts, you'll have the following structure:
 ├── chordonomicon_data/
 │   ├── chordonomicon_v2.csv          # Original dataset
 │   ├── chordonomicon_enriched.csv    # Dataset with artist/song names
+│   ├── chordonomicon_with_lyrics.csv # Dataset with lyrics added
 │   ├── sample_data.json              # Sample of original data
 │   ├── enriched_sample.json          # Sample of enriched data
 │   ├── chord_statistics.json         # Analysis of chord usage
@@ -129,6 +179,7 @@ After running the scripts, you'll have the following structure:
 │   └── README.md                     # Original dataset documentation
 ├── chordonomicon_downloader.py
 ├── spotify_connector_v2.py
+├── gpu_merge_datasets.py
 └── chordonomicon_explorer.py
 ```
 

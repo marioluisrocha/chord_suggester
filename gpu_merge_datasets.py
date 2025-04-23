@@ -136,14 +136,15 @@ def get_csv_header(file_path):
     return header
 
 
-def detect_columns(file_path, potential_artist_cols, potential_title_cols, potential_lyrics_cols=None):
-    """Detect artist, title, and optionally lyrics columns in a CSV file."""
+def detect_columns(file_path, potential_artist_cols, potential_title_cols, potential_lyrics_cols=None, potential_language_cols=None):
+    """Detect artist, title, lyrics, and language columns in a CSV file."""
     header = get_csv_header(file_path)
     header_lower = [col.lower() for col in header]
     
     artist_col = None
     title_col = None
     lyrics_col = None
+    language_col = None
     
     # Find artist column
     for col in potential_artist_cols:
@@ -164,12 +165,33 @@ def detect_columns(file_path, potential_artist_cols, potential_title_cols, poten
                 lyrics_col = header[header_lower.index(col.lower())]
                 break
     
-    return artist_col, title_col, lyrics_col
+    # Find language column if needed
+    if potential_language_cols:
+        for col in potential_language_cols:
+            if col.lower() in header_lower:
+                language_col = header[header_lower.index(col.lower())]
+                break
+    
+    return artist_col, title_col, lyrics_col, language_col
 
 
 def process_lyrics_chunk_gpu(lyrics_chunk, artist_col_lyrics, title_col_lyrics, lyrics_col, 
-                          lyrics_dict, artist_titles_dict, all_artists):
+                          lyrics_dict, artist_titles_dict, all_artists,
+                          language_col=None, language_filter=None):
     """Process a chunk of the lyrics dataset using GPU acceleration."""
+    # Filter by language if specified
+    if language_col and language_filter:
+        if isinstance(language_filter, list):
+            # Filter for multiple languages
+            lyrics_chunk = lyrics_chunk[lyrics_chunk[language_col].isin(language_filter)]
+        else:
+            # Filter for a single language
+            lyrics_chunk = lyrics_chunk[lyrics_chunk[language_col] == language_filter]
+        
+        # Skip if chunk is empty after filtering
+        if lyrics_chunk.empty:
+            return
+    
     # Convert to cuDF DataFrame
     gpu_chunk = cudf.DataFrame.from_pandas(lyrics_chunk)
     
@@ -209,7 +231,8 @@ def process_lyrics_chunk_gpu(lyrics_chunk, artist_col_lyrics, title_col_lyrics, 
 
 
 def merge_datasets_gpu(spotify_file, lyrics_file, output_file, artist_threshold=85, 
-                    title_threshold=85, chunk_size=10000, batch_size=1000):
+                    title_threshold=85, chunk_size=10000, batch_size=1000,
+                    language_filter=None, language_column=None):
     """
     GPU-accelerated function to merge Spotify and lyrics datasets.
     
@@ -229,6 +252,10 @@ def merge_datasets_gpu(spotify_file, lyrics_file, output_file, artist_threshold=
         Number of rows to process at once
     batch_size : int
         Number of rows to process in each GPU batch
+    language_filter : str or list
+        Language(s) to filter the lyrics by (e.g., 'en' for English or ['en', 'es'] for English and Spanish)
+    language_column : str
+        Column to use for language filtering ('language_cld3' or 'language_ft')
     """
     start_time = time.time()
     print(f"Starting GPU-accelerated merge of {spotify_file} and {lyrics_file}")
@@ -237,12 +264,19 @@ def merge_datasets_gpu(spotify_file, lyrics_file, output_file, artist_threshold=
     potential_artist_cols = ['artist', 'artist_name', 'artist_names', 'artists', 'artistName', 'performer']
     potential_title_cols = ['title', 'track', 'name', 'song', 'track_name', 'song_name', 'track_title', 'song_title']
     potential_lyrics_cols = ['lyrics', 'lyric', 'text', 'song_lyrics', 'track_lyrics']
+    potential_language_cols = ['language_cld3', 'language_ft', 'language', 'lang']
     
     # Detect columns in spotify file
-    artist_col_spotify, title_col_spotify, _ = detect_columns(spotify_file, potential_artist_cols, potential_title_cols)
+    artist_col_spotify, title_col_spotify, _, _ = detect_columns(spotify_file, potential_artist_cols, potential_title_cols)
     
-    # Detect columns in lyrics file
-    artist_col_lyrics, title_col_lyrics, lyrics_col = detect_columns(lyrics_file, potential_artist_cols, potential_title_cols, potential_lyrics_cols)
+    # Detect columns in lyrics file, including language column
+    artist_col_lyrics, title_col_lyrics, lyrics_col, detected_language_col = detect_columns(
+        lyrics_file, potential_artist_cols, potential_title_cols, 
+        potential_lyrics_cols, potential_language_cols
+    )
+    
+    # Use specified language column or fall back to detected one
+    language_col = language_column or detected_language_col
     
     if not all([artist_col_spotify, title_col_spotify, artist_col_lyrics, title_col_lyrics, lyrics_col]):
         print("Could not detect required columns in the datasets.")
@@ -254,6 +288,16 @@ def merge_datasets_gpu(spotify_file, lyrics_file, output_file, artist_threshold=
     print(f"  Spotify: artist='{artist_col_spotify}', title='{title_col_spotify}'")
     print(f"  Lyrics: artist='{artist_col_lyrics}', title='{title_col_lyrics}', lyrics='{lyrics_col}'")
     
+    # Print language filtering info if applicable
+    if language_filter and language_col:
+        if isinstance(language_filter, list):
+            languages_str = ", ".join(language_filter)
+            print(f"  Filtering lyrics by {language_col} to include only: {languages_str}")
+        else:
+            print(f"  Filtering lyrics by {language_col} to include only: {language_filter}")
+    elif language_filter and not language_col:
+        print(f"  Warning: Language filter specified but no language column detected. Proceeding without filtering.")
+    
     # Prepare data structures for matches
     lyrics_dict = {}  # For exact matches: (artist, title) -> lyrics
     artist_titles_dict = {}  # artist -> list of titles
@@ -262,19 +306,50 @@ def merge_datasets_gpu(spotify_file, lyrics_file, output_file, artist_threshold=
     # Process lyrics file in chunks to reduce memory usage
     print(f"Processing lyrics file in chunks of {chunk_size} rows...")
     chunks_processed = 0
+    rows_before_filter = 0
+    rows_after_filter = 0
+    
+    # Determine columns to read from lyrics file
+    cols_to_use = [artist_col_lyrics, title_col_lyrics, lyrics_col]
+    if language_filter and language_col:
+        cols_to_use.append(language_col)
     
     # Use chunking to build dictionaries
     for lyrics_chunk in pd.read_csv(lyrics_file, chunksize=chunk_size, encoding='utf-8',
-                                   low_memory=True, usecols=[artist_col_lyrics, title_col_lyrics, lyrics_col]):
-        process_lyrics_chunk_gpu(lyrics_chunk, artist_col_lyrics, title_col_lyrics, lyrics_col, 
-                              lyrics_dict, artist_titles_dict, all_artists)
+                                   low_memory=True, usecols=cols_to_use):
+        rows_before_filter += len(lyrics_chunk)
+        
+        # Process this chunk with language filtering if needed
+        process_lyrics_chunk_gpu(
+            lyrics_chunk, artist_col_lyrics, title_col_lyrics, lyrics_col,
+            lyrics_dict, artist_titles_dict, all_artists,
+            language_col, language_filter
+        )
+        
+        # Count rows after potential filtering (for statistics)
+        if language_filter and language_col:
+            if isinstance(language_filter, list):
+                rows_after_filter += len(lyrics_chunk[lyrics_chunk[language_col].isin(language_filter)])
+            else:
+                rows_after_filter += len(lyrics_chunk[lyrics_chunk[language_col] == language_filter])
+        else:
+            rows_after_filter += len(lyrics_chunk)
+        
         chunks_processed += 1
         print(f"Processed {chunks_processed * chunk_size} rows from lyrics file...")
+        
         # Explicitly trigger garbage collection to free memory
         cp.cuda.Device().synchronize()
         gc.collect()
     
     print(f"Completed processing {lyrics_file}.")
+    
+    # Print filtering statistics if applicable
+    if language_filter and language_col:
+        filtered_out = rows_before_filter - rows_after_filter
+        filtered_pct = (filtered_out / rows_before_filter * 100) if rows_before_filter > 0 else 0
+        print(f"Language filtering: {filtered_out} rows filtered out ({filtered_pct:.2f}%)")
+    
     print(f"Built dictionary with {len(lyrics_dict)} unique (artist, title) pairs")
     print(f"Found {len(all_artists)} unique artists")
     
@@ -403,8 +478,19 @@ if __name__ == "__main__":
     parser.add_argument('--title-threshold', type=int, default=85, help='Threshold for fuzzy matching song titles (0-100)')
     parser.add_argument('--chunk-size', type=int, default=10000, help='Number of rows to process at once')
     parser.add_argument('--batch-size', type=int, default=1000, help='Number of rows to process in each GPU batch')
+    parser.add_argument('--language', help='Filter by language (e.g., "en" for English). Can be a comma-separated list (e.g., "en,es,fr")')
+    parser.add_argument('--language-column', choices=['language_cld3', 'language_ft'], 
+                      help='Column to use for language filtering (default: auto-detect)')
     
     args = parser.parse_args()
+    
+    # Process language filter if specified
+    language_filter = None
+    if args.language:
+        if ',' in args.language:
+            language_filter = [lang.strip() for lang in args.language.split(',')]
+        else:
+            language_filter = args.language
     
     merge_datasets_gpu(
         args.spotify_file,
@@ -413,5 +499,7 @@ if __name__ == "__main__":
         args.artist_threshold,
         args.title_threshold,
         args.chunk_size,
-        args.batch_size
+        args.batch_size,
+        language_filter,
+        args.language_column
     )
